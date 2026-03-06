@@ -188,9 +188,3 @@ Built on top of:
 - [timm](https://github.com/rwightman/pytorch-image-models)
 
 ---
-
-## Contact
-
-Questions or suggestions? Open an issue or reach out directly.
-
-> This project was built for a product-track ML hackathon. Core training logic adapted from [G-U-N/a-PyTorch-Tutorial-to-Class-Incremental-Learning](https://github.com/G-U-N/a-PyTorch-Tutorial-to-Class-Incremental-Learning).
