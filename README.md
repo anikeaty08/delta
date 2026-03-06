@@ -78,7 +78,7 @@ This gives a **provable upper bound** on accuracy gap between the delta-updated 
 ### Install
 
 ```bash
-git clone https://github.com/your-username/delta-only-training.git
+git clone https://github.com/anikeaty08/delta.git
 cd delta-only-training
 pip install -r requirements.txt
 ```
