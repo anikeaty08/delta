@@ -11,7 +11,7 @@ import copy
 import math
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -20,9 +20,10 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
+from delta_framework.resnet import resnet20, resnet32, resnet44, resnet56
+
 try:
-    from continuum import ClassIncremental
-    from continuum import rehearsal
+    from continuum import ClassIncremental, rehearsal
     from continuum.datasets import CIFAR100 as ContinuumCIFAR100
     from continuum.datasets import ImageFolderDataset
 
@@ -32,10 +33,8 @@ try:
         ContinuumCIFAR10 = None  # type: ignore
 except Exception as e:  # pragma: no cover
     raise ImportError(
-        "Missing dependency `continuum`. Install requirements.txt first."
+        "Missing dependency `continuum`. Install project dependencies first (e.g. `pip install -e .`)."
     ) from e
-
-from resnet import resnet20, resnet32, resnet44, resnet56
 
 
 # Fixed class order from the original tutorial script (CIFAR-100).
@@ -337,7 +336,7 @@ class CilModel(nn.Module):
     @property
     def feature_dim(self) -> int:
         # `resnet.py` backbones expose `.out_dim`
-        return int(getattr(self.backbone, "out_dim"))
+        return int(self.backbone.out_dim)
 
     def extract_vector(self, x: torch.Tensor) -> torch.Tensor:
         return self.backbone(x)
@@ -362,8 +361,14 @@ class CilModel(nn.Module):
         else:
             self.fc.adaption(nb_classes, device=self._device)
 
-    def after_model_adaption(self, nb_new_classes: int, task_id: int) -> None:
-        if task_id > 0:
+    def after_model_adaption(
+        self,
+        nb_new_classes: int,
+        task_id: int,
+        *,
+        apply_weight_align: bool = True,
+    ) -> None:
+        if task_id > 0 and apply_weight_align:
             self.weight_align(nb_new_classes)
 
     @torch.no_grad()
@@ -412,6 +417,9 @@ class TrainConfig:
     memory_size: int = 2000
     herding_method: str = "barycenter"
     fixed_memory: bool = False
+    use_replay: bool = True
+    use_kd: bool = True
+    use_weight_align: bool = True
 
 
 def _accuracy_topk(logits: torch.Tensor, targets: torch.Tensor, k: int) -> float:
@@ -583,6 +591,45 @@ def _maybe_subsample_memory(
     return x[idx], y[idx], t[idx]
 
 
+def _prepare_delta_train_dataset(
+    *,
+    dataset_train: Any,
+    memory: "rehearsal.RehearsalMemory",
+    config: TrainConfig,
+    task_id: int,
+    rng: np.random.Generator,
+) -> Tuple[Any, int]:
+    """Return a training dataset with replay samples added without mutating the source task."""
+
+    if task_id <= 0 or not config.use_replay or config.memory_size <= 0:
+        return dataset_train, 0
+
+    old_frac = float(np.clip(config.old_fraction, 0.0, 0.95))
+    if old_frac <= 0.0:
+        return dataset_train, 0
+
+    new_n = len(dataset_train)
+    max_old = int((old_frac / max(1e-6, (1.0 - old_frac))) * new_n)
+    if max_old <= 0:
+        return dataset_train, 0
+
+    mem_x, mem_y, mem_t = _maybe_subsample_memory(memory, rng=rng, max_samples=max_old)
+    replay_count = int(len(mem_y))
+    if replay_count <= 0:
+        return dataset_train, 0
+
+    try:
+        delta_dataset = copy.deepcopy(dataset_train)
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(
+            "Unable to clone task dataset for replay mixing. "
+            "Delta training would otherwise mutate the full-retrain baseline."
+        ) from exc
+
+    delta_dataset.add_samples(mem_x, mem_y, mem_t)
+    return delta_dataset, replay_count
+
+
 def train_one_task_delta(
     *,
     model: CilModel,
@@ -602,20 +649,16 @@ def train_one_task_delta(
 
     model.prev_model_adaption(nb_new_classes)
     model.to(device)
-
-    if task_id > 0 and config.memory_size > 0:
-        new_n = len(dataset_train)
-        old_frac = float(np.clip(config.old_fraction, 0.0, 0.95))
-        if old_frac > 0.0:
-            max_old = int((old_frac / max(1e-6, (1.0 - old_frac))) * new_n)
-            if max_old > 0:
-                mem_x, mem_y, mem_t = _maybe_subsample_memory(
-                    memory, rng=rng, max_samples=max_old
-                )
-                dataset_train.add_samples(mem_x, mem_y, mem_t)
+    dataset_train_delta, replay_samples_added = _prepare_delta_train_dataset(
+        dataset_train=dataset_train,
+        memory=memory,
+        config=config,
+        task_id=task_id,
+        rng=rng,
+    )
 
     train_loader = _make_loader(
-        dataset_train,
+        dataset_train_delta,
         batch_size=config.batch_size,
         num_workers=config.num_workers,
         shuffle=True,
@@ -646,7 +689,7 @@ def train_one_task_delta(
             logits, _ = model(images)
             loss_ce = criterion(logits, targets)
 
-            if teacher_model is not None and known_classes > 0:
+            if config.use_kd and teacher_model is not None and known_classes > 0:
                 with torch.no_grad():
                     t_logits, _ = teacher_model(images)
                 loss_kd = float(config.lambda_kd) * kd_criterion(
@@ -661,7 +704,11 @@ def train_one_task_delta(
             loss.backward()
             optimizer.step()
 
-    model.after_model_adaption(nb_new_classes, task_id=task_id)
+    model.after_model_adaption(
+        nb_new_classes,
+        task_id=task_id,
+        apply_weight_align=config.use_weight_align,
+    )
 
     eval_metrics = evaluate(model, val_loader, device=device, num_classes=known_classes + nb_new_classes)
 
@@ -690,6 +737,10 @@ def train_one_task_delta(
         "known_classes": int(known_classes),
         "nb_new_classes": int(nb_new_classes),
         "total_classes": int(known_classes + nb_new_classes),
+        "replay_samples_added": int(replay_samples_added),
+        "used_replay": bool(config.use_replay and replay_samples_added > 0),
+        "used_kd": bool(config.use_kd and teacher_model is not None and known_classes > 0),
+        "used_weight_align": bool(config.use_weight_align and task_id > 0),
     }
 
     return model, new_teacher, eval_metrics, train_artifacts

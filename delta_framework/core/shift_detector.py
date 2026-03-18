@@ -7,11 +7,9 @@ closed-form KL divergence between the same class before vs after an update.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-import torch
-from torch.utils.data import DataLoader
 
 
 @dataclass(frozen=True)
@@ -77,36 +75,41 @@ def detect_shift_from_embeddings(
     )
 
 
-@torch.no_grad()
 def extract_embeddings_by_class(
     *,
     model: Any,
-    data_loader: DataLoader,
-    device: torch.device,
+    data_loader: Any,
+    device: Any,
     class_ids: Optional[Sequence[int]] = None,
     max_per_class: int = 256,
 ) -> Dict[int, np.ndarray]:
     """Extract penultimate embeddings (model.extract_vector) grouped by class."""
+    try:
+        import torch  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise ImportError("`torch` is required for embedding extraction.") from e
+
     model.eval()
     selected = set(class_ids) if class_ids is not None else None
 
     out: Dict[int, List[np.ndarray]] = {}
     counts: Dict[int, int] = {}
 
-    for images, targets, _task_ids in data_loader:
-        images = images.to(device, non_blocking=True)
-        feats = model.extract_vector(images).detach().cpu().numpy()
-        t = targets.detach().cpu().numpy().astype(np.int64)
+    with torch.no_grad():
+        for images, targets, _task_ids in data_loader:
+            images = images.to(device, non_blocking=True)
+            feats = model.extract_vector(images).detach().cpu().numpy()
+            t = targets.detach().cpu().numpy().astype(np.int64)
 
-        for i in range(len(t)):
-            c = int(t[i])
-            if selected is not None and c not in selected:
-                continue
-            cur = counts.get(c, 0)
-            if cur >= max_per_class:
-                continue
-            out.setdefault(c, []).append(feats[i : i + 1])
-            counts[c] = cur + 1
+            for i in range(len(t)):
+                c = int(t[i])
+                if selected is not None and c not in selected:
+                    continue
+                cur = counts.get(c, 0)
+                if cur >= max_per_class:
+                    continue
+                out.setdefault(c, []).append(feats[i : i + 1])
+                counts[c] = cur + 1
 
     return {c: np.concatenate(v, axis=0) for c, v in out.items()}
 
@@ -116,7 +119,7 @@ def detect_shift_for_models(
     before_model: Any,
     after_model: Any,
     dataset: Any,
-    device: torch.device,
+    device: Any,
     class_ids: Sequence[int],
     batch_size: int = 128,
     num_workers: int = 2,
@@ -125,12 +128,17 @@ def detect_shift_for_models(
     aggregate: str = "mean",
 ) -> ShiftResult:
     """Convenience wrapper: compute drift on a dataset for specified classes."""
+    try:
+        from torch.utils.data import DataLoader  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise ImportError("`torch` is required for shift detection on models/datasets.") from e
+
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=(device.type == "cuda"),
+        pin_memory=getattr(device, "type", None) == "cuda",
     )
     before = extract_embeddings_by_class(
         model=before_model,

@@ -42,6 +42,20 @@ def compute_savings_percent(t_full_s: float, t_delta_s: float) -> float:
     return float(((t_full_s - t_delta_s) / t_full_s) * 100.0)
 
 
+def _per_class_gap(
+    full_metrics: Dict[str, Any],
+    delta_metrics: Dict[str, Any],
+) -> tuple[Optional[float], Optional[float]]:
+    full = np.asarray(full_metrics.get("per_class_acc", []), dtype=np.float64)
+    delta = np.asarray(delta_metrics.get("per_class_acc", []), dtype=np.float64)
+    if full.size == 0 or delta.size == 0:
+        return None, None
+
+    n = min(full.size, delta.size)
+    gaps = np.abs(full[:n] - delta[:n])
+    return float(np.max(gaps)), float(np.mean(gaps))
+
+
 def summarize_equivalence(
     *,
     full_metrics: Dict[str, Any],
@@ -69,11 +83,14 @@ def summarize_equivalence(
         confusion_similarity = confusion_cosine_similarity(conf_full, conf_delta)
 
     gap = abs(acc_full - acc_delta)
+    worst_class_gap, mean_class_gap = _per_class_gap(full_metrics, delta_metrics)
 
     return {
         "equivalence_gap": float(gap),
         "is_equivalent": bool(gap < float(equivalence_threshold)),
         "calibration_diff": float(abs(ece_full - ece_delta)),
+        "worst_class_acc_gap": worst_class_gap,
+        "mean_class_acc_gap": mean_class_gap,
         "confusion_similarity": confusion_similarity,
         "timing_full_s": float(timing_full_s),
         "timing_delta_s": float(timing_delta_s),

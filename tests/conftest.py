@@ -1,12 +1,17 @@
 """Shared pytest fixtures for the test suite."""
 
-import tempfile
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Generator
-import pytest
-import torch
+
 import numpy as np
+import pytest
+
+try:  # pragma: no cover
+    import torch  # type: ignore
+except Exception:  # pragma: no cover
+    torch = None  # type: ignore
 
 
 @pytest.fixture
@@ -41,6 +46,8 @@ def mock_config() -> dict:
 @pytest.fixture
 def sample_tensor() -> torch.Tensor:
     """Create a sample tensor for testing."""
+    if torch is None:  # pragma: no cover
+        pytest.skip("torch is not installed")
     return torch.randn(4, 3, 32, 32)
 
 
@@ -53,6 +60,8 @@ def sample_numpy_array() -> np.ndarray:
 @pytest.fixture
 def mock_model_state():
     """Mock model state dictionary."""
+    if torch is None:  # pragma: no cover
+        pytest.skip("torch is not installed")
     return {
         "conv1.weight": torch.randn(64, 3, 7, 7),
         "conv1.bias": torch.randn(64),
@@ -64,11 +73,14 @@ def mock_model_state():
 @pytest.fixture(autouse=True)
 def reset_random_seeds():
     """Reset random seeds before each test for reproducibility."""
-    torch.manual_seed(42)
+    if torch is not None:  # pragma: no cover
+        torch.manual_seed(42)
     np.random.seed(42)
 
 
 @pytest.fixture
 def device() -> torch.device:
     """Get the appropriate device for testing."""
+    if torch is None:  # pragma: no cover
+        pytest.skip("torch is not installed")
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -1,13 +1,19 @@
+"""Legacy training script from the original tutorial.
+
+Kept as an example/reference implementation; the supported API lives under
+`delta_framework/`.
+"""
+
 import argparse
 import copy
 import torch
 from torch.utils.data import DataLoader
 import numpy as np
-from resnet import resnet20, resnet32, resnet44, resnet56
+from delta_framework.resnet import resnet20, resnet32, resnet44, resnet56
 import torch.nn as nn
 import timm
 from continuum import rehearsal
-from utils import MetricLogger, SoftTarget, init_distributed_mode, build_dataset
+from examples.utils import MetricLogger, SoftTarget, init_distributed_mode, build_dataset
 
 
 def get_args_parser():

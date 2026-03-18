@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -18,10 +19,9 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-
 RESULTS_PATH = "results.json"
 LOG_PATH = "experiment.log"
-RUNNER_PATH = os.path.join("delta_framework", "experiments", "run_experiment.py")
+RUNNER_MODULE = "delta_framework.experiments.run_experiment"
 
 
 def _load_results(path: str = RESULTS_PATH) -> Optional[Dict[str, Any]]:
@@ -42,8 +42,41 @@ def _is_process_running(proc: Optional[subprocess.Popen]) -> bool:
 
 def _start_experiment(cmd: list[str]) -> subprocess.Popen:
     # Stream logs to a file for UI debugging.
-    log_f = open(LOG_PATH, "w", encoding="utf-8")
+    # Keep a handle in session_state so we can close it on stop/exit.
+    log_f = open(LOG_PATH, "w", encoding="utf-8", buffering=1)
+    st.session_state["log_f"] = log_f
     return subprocess.Popen(cmd, stdout=log_f, stderr=subprocess.STDOUT)
+
+
+def _tail_text(path: str, max_lines: int = 200) -> str:
+    p = Path(path)
+    if not p.exists():
+        return ""
+    try:
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(lines[-max_lines:])
+    except Exception:
+        return ""
+
+
+def _stop_experiment() -> None:
+    proc = st.session_state.get("proc")
+    if proc is not None and _is_process_running(proc):
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+
+    st.session_state["proc"] = None
+
+    log_f = st.session_state.get("log_f")
+    if log_f is not None:
+        try:
+            log_f.close()
+        except Exception:
+            pass
+    st.session_state["log_f"] = None
 
 
 def _get_task_series(results: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -100,6 +133,26 @@ def _badge_color(gap: float) -> str:
     return "red"
 
 
+def _ablation_frame(task: Dict[str, Any]) -> pd.DataFrame:
+    ablations = task.get("ablations", {}) or {}
+    rows = []
+    for name, record in ablations.items():
+        metrics = record.get("metrics", {}) or {}
+        eq = record.get("equivalence", {}) or {}
+        rows.append(
+            {
+                "variant": name,
+                "top1": float(metrics.get("top1", 0.0)),
+                "ece": float(metrics.get("ece", 0.0)),
+                "equivalence_gap": float(eq.get("equivalence_gap", 0.0)),
+                "compute_savings_percent": float(eq.get("compute_savings_percent", 0.0)),
+            }
+        )
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values("top1", ascending=False)
+
+
 def page_setup():
     st.header("Setup")
 
@@ -118,6 +171,23 @@ def page_setup():
 
     prefer_cuda = st.checkbox("Use GPU if available", value=True)
     seed = st.number_input("Seed", min_value=0, max_value=10_000_000, value=0)
+    run_ablations = st.checkbox("Run ablation baselines", value=False)
+    equivalence_threshold = st.slider(
+        "Equivalence gap threshold",
+        min_value=0.001,
+        max_value=0.05,
+        value=0.005,
+        step=0.001,
+        format="%.3f",
+    )
+    policy_bound_epsilon = st.slider(
+        "Policy max bound epsilon",
+        min_value=0.001,
+        max_value=0.05,
+        value=0.01,
+        step=0.001,
+        format="%.3f",
+    )
 
     st.divider()
 
@@ -128,6 +198,12 @@ def page_setup():
         refresh = st.button("Refresh Results")
         _ = refresh
 
+    stop = st.button("Stop Experiment")
+    if stop:
+        _stop_experiment()
+        st.info("Experiment stopped.")
+        return
+
     if start:
         if _is_process_running(st.session_state.get("proc")):
             st.warning("Experiment already running.")
@@ -135,7 +211,8 @@ def page_setup():
 
         cmd = [
             sys.executable,
-            RUNNER_PATH,
+            "-m",
+            RUNNER_MODULE,
             "--dataset",
             dataset,
             "--data-path",
@@ -152,11 +229,17 @@ def page_setup():
             str(int(batch_size)),
             "--seed",
             str(int(seed)),
+            "--equivalence-threshold",
+            str(float(equivalence_threshold)),
+            "--policy-max-bound-epsilon",
+            str(float(policy_bound_epsilon)),
             "--results-path",
             RESULTS_PATH,
         ]
         if prefer_cuda:
             cmd.append("--prefer-cuda")
+        if run_ablations:
+            cmd.append("--run-ablations")
 
         st.session_state["proc"] = _start_experiment(cmd)
         st.session_state["started_cmd"] = cmd
@@ -172,12 +255,8 @@ def page_setup():
 
     if os.path.exists(LOG_PATH):
         with st.expander("Runner logs (tail)"):
-            try:
-                with open(LOG_PATH, "r", encoding="utf-8") as f:
-                    lines = f.readlines()[-200:]
-                st.code("".join(lines))
-            except Exception:
-                st.write("Unable to read log file.")
+            tail = _tail_text(LOG_PATH, max_lines=200)
+            st.code(tail if tail else "(empty)")
 
 
 def page_live_training():
@@ -201,6 +280,13 @@ def page_live_training():
     with colB:
         st.subheader("Delta Method")
         st.progress(min(1.0, completed / max(1, num_tasks)))
+
+    with st.expander("Runner logs (tail)"):
+        tail = _tail_text(LOG_PATH, max_lines=200)
+        if tail:
+            st.code(tail)
+        else:
+            st.write("No logs yet.")
 
     df_delta, df_full = _get_task_series(res)
     if not df_delta.empty:
@@ -228,6 +314,17 @@ def page_live_training():
                 f"Stable. KL={float(latest_shift.get('shift_score', 0.0)):.3f}"
             )
 
+    latest_deployment = tasks[-1].get("deployment", {}) if tasks else {}
+    if latest_deployment:
+        action = latest_deployment.get("selected_source", "delta_update")
+        if action == "delta_update":
+            st.info("Policy decision: deploy delta update")
+        else:
+            st.warning("Policy decision: fall back to full retrain")
+        reasons = latest_deployment.get("reasons", [])
+        if reasons:
+            st.caption("Policy reasons: " + ", ".join(str(reason) for reason in reasons))
+
     st.subheader("Raw status")
     st.json(res.get("status", {}))
 
@@ -253,6 +350,10 @@ def page_results_dashboard():
     final_full = final.get("full", {}) or {}
     final_delta = final.get("delta", {}) or {}
     final_eq = final.get("equivalence", {}) or {}
+    final_deployment = final.get("deployment", {}) or {}
+    final_summary = res.get("final_summary", {}) or {}
+    cfg = res.get("config", {}) or {}
+    gap_threshold = float(cfg.get("equivalence_threshold", 0.005))
 
     df_delta, df_full = _get_task_series(res)
     total_full = float(df_full["wall_time_s"].sum()) if not df_full.empty else 0.0
@@ -262,7 +363,12 @@ def page_results_dashboard():
     if total_full > 0:
         compute_saved = ((total_full - total_delta) / total_full) * 100.0
 
-    st.metric("Compute Saved", f"{compute_saved:.1f}%")
+    policy_saved = float(final_summary.get("policy_compute_savings_percent", 0.0))
+    top_metrics = st.columns(4)
+    top_metrics[0].metric("Delta Compute Saved", f"{compute_saved:.1f}%")
+    top_metrics[1].metric("Policy Compute Saved", f"{policy_saved:.1f}%")
+    top_metrics[2].metric("Policy Choice", str(final_deployment.get("selected_source", "n/a")))
+    top_metrics[3].metric("Unsafe Delta Count", str(int(final_summary.get("unsafe_delta_count", 0))))
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Final Top-1 (Full)", f"{float(final_full.get('top1', 0.0))*100:.2f}%")
@@ -270,8 +376,18 @@ def page_results_dashboard():
     gap = float(final_eq.get("equivalence_gap", abs(float(final_full.get("top1", 0.0)) - float(final_delta.get("top1", 0.0)))))
     col3.metric("Equivalence Gap", f"{gap*100:.2f}%")
 
+    extra_metrics = st.columns(2)
+    extra_metrics[0].metric(
+        "Calibration Diff",
+        f"{float(final_eq.get('calibration_diff', 0.0)) * 100:.2f}%",
+    )
+    extra_metrics[1].metric(
+        "Worst Class Gap",
+        f"{float(final_eq.get('worst_class_acc_gap') or 0.0) * 100:.2f}%",
+    )
+
     st.markdown(
-        f"**Equivalence badge:** :{_badge_color(gap)}[{'Equivalent' if gap < 0.005 else 'Not equivalent'}]"
+        f"**Equivalence badge:** :{_badge_color(gap)}[{'Equivalent' if gap < gap_threshold else 'Not equivalent'}]"
     )
 
     st.subheader("Accuracy over tasks")
@@ -300,6 +416,15 @@ def page_results_dashboard():
     eps = float(bound.get("guaranteed_epsilon", 0.0)) * 100.0
     conf = float(bound.get("confidence_level", 0.95)) * 100.0
     st.write(f"Guaranteed within ε={eps:.2f}% with {conf:.1f}% confidence")
+
+    if final_deployment:
+        st.subheader("Deployment Decision")
+        st.json(final_deployment)
+
+    ablation_df = _ablation_frame(final)
+    if not ablation_df.empty:
+        st.subheader("Ablation Variants")
+        st.dataframe(ablation_df, use_container_width=True)
 
     st.subheader("Confusion matrices (final)")
     cm_full = np.asarray(final_full.get("confusion_matrix", []))
@@ -357,6 +482,8 @@ def main():
 
     if "proc" not in st.session_state:
         st.session_state["proc"] = None
+    if "log_f" not in st.session_state:
+        st.session_state["log_f"] = None
 
     page = st.sidebar.radio("Pages", ["Setup", "Live Training", "Results Dashboard", "Shift Analysis"])
 
@@ -372,6 +499,13 @@ def main():
     proc = st.session_state.get("proc")
     if proc is not None and not _is_process_running(proc):
         st.sidebar.info("Runner process finished.")
+        log_f = st.session_state.get("log_f")
+        if log_f is not None:
+            try:
+                log_f.close()
+            except Exception:
+                pass
+        st.session_state["log_f"] = None
 
 
 if __name__ == "__main__":

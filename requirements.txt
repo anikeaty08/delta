@@ -1,5 +1,15 @@
+# Core library dependencies.
+# Note: for GPU/CUDA installs, prefer installing `torch`/`torchvision` using the
+# official PyTorch instructions for your platform, then install this project.
 continuum==1.2.2
-numpy==1.22.3
-timm==0.5.4
-torch==1.11.0+cu113
-torchvision==0.12.0+cu113
+numpy>=1.22.3
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Optional UI (Streamlit dashboard)
+# streamlit>=1.25.0
+# pandas>=1.5.0
+# matplotlib>=3.7.0
+
+# Optional examples
+# timm>=0.5.4

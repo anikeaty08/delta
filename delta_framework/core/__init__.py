@@ -6,5 +6,6 @@ __all__ = [
     "equivalence",
     "benchmarker",
     "bounds",
+    "policy",
 ]
 

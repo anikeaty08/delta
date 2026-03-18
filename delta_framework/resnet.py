@@ -1,3 +1,9 @@
+"""Small ResNet variants for CIFAR-style inputs.
+
+This file is vendored to keep the core trainer self-contained and to ensure
+imports work when installed as a package.
+"""
+
 import math
 
 import torch
@@ -99,7 +105,7 @@ class CifarResNet(nn.Module):
         layers = []
         layers.append(block(self.inplanes, planes, stride, downsample))
         self.inplanes = planes * block.expansion
-        for i in range(1, blocks):
+        for _i in range(1, blocks):
             layers.append(block(self.inplanes, planes))
 
         return nn.Sequential(*layers)

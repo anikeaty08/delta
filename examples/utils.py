@@ -1,3 +1,5 @@
+"""Legacy helpers used by `examples/template.py`."""
+
 from collections import deque
 import os
 from collections import defaultdict, deque
