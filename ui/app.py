@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -57,6 +58,86 @@ def _tail_text(path: str, max_lines: int = 200) -> str:
         return "\n".join(lines[-max_lines:])
     except Exception:
         return ""
+
+
+def _parse_iso_timestamp(value: Any) -> Optional[datetime]:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _format_elapsed(started_at: Any) -> str:
+    started = _parse_iso_timestamp(started_at)
+    if started is None:
+        return "n/a"
+    try:
+        elapsed = max(0.0, time.time() - started.timestamp())
+    except Exception:
+        return "n/a"
+    if elapsed < 60:
+        return f"{elapsed:.0f}s"
+    minutes, seconds = divmod(int(elapsed), 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m"
+
+
+def _phase_label(status: Dict[str, Any], total_tasks: int) -> str:
+    phase = str(status.get("phase") or "").strip()
+    current_task = int(status.get("current_task") or 0)
+    if phase == "delta_training":
+        return f"Delta training (task {current_task}/{max(1, total_tasks)})"
+    if phase == "full_retrain":
+        return f"Full retrain baseline (task {current_task}/{max(1, total_tasks)})"
+    if phase == "setup":
+        return "Preparing experiment"
+    if phase == "completed":
+        return "Completed"
+    if phase == "failed":
+        return "Failed"
+    message = str(status.get("message") or "").strip()
+    return message or "Waiting"
+
+
+def _render_run_status(res: Dict[str, Any]) -> None:
+    status = res.get("status", {}) or {}
+    cfg = res.get("config", {}) or {}
+    total_tasks = int(cfg.get("num_tasks", 0) or 0)
+    completed = len(res.get("timeline", {}).get("tasks", []))
+    cols = st.columns(4)
+    cols[0].metric("Run State", str(status.get("state", "idle")).title())
+    cols[1].metric("Completed Tasks", f"{completed}/{max(1, total_tasks)}")
+    cols[2].metric("Current Step", _phase_label(status, total_tasks))
+    cols[3].metric("Elapsed", _format_elapsed(status.get("started_at")))
+
+    phase_elapsed = _format_elapsed(status.get("phase_started_at"))
+    if phase_elapsed != "n/a":
+        st.caption(f"Current step time: {phase_elapsed}")
+
+
+def _render_partial_task(res: Dict[str, Any]) -> None:
+    partial = res.get("partial_task") or {}
+    delta = partial.get("delta", {}) or {}
+    artifacts = partial.get("delta_artifacts", {}) or {}
+    if not partial or not delta:
+        return
+
+    st.subheader("Current Partial Results")
+    cols = st.columns(4)
+    cols[0].metric("Task", str(int(partial.get("task_id", 0)) + 1))
+    cols[1].metric("Seen Classes", str(int(partial.get("seen_classes", 0))))
+    cols[2].metric("Delta Top-1", f"{float(delta.get('top1', 0.0)) * 100:.2f}%")
+    cols[3].metric("Delta Time", f"{float(delta.get('wall_time_s', 0.0)):.1f}s")
+    st.caption(
+        "Delta update is finished for the current task. The app is now waiting for the "
+        "full-retrain baseline to finish so it can compare both methods."
+    )
+    if artifacts:
+        st.json(artifacts)
 
 
 def _stop_experiment() -> None:
@@ -160,6 +241,7 @@ def page_setup():
     num_tasks = st.slider("Number of tasks/increments", min_value=2, max_value=10, value=5)
     classes_per_task = st.slider("Classes per task", min_value=1, max_value=50, value=20)
     old_fraction = st.slider("Old/New data split (old replay fraction)", 0.0, 0.9, value=0.2, step=0.05)
+    st.caption("Tip: for a fast CPU demo, use CIFAR-10, 2 tasks, 1 epoch, and 0 data-loader workers.")
 
     if dataset == "TinyImageNet":
         data_path = st.text_input("TinyImageNet path (must contain train/ and val/ folders)", value="./tinyimagenet")
@@ -168,6 +250,7 @@ def page_setup():
 
     epochs = st.slider("Epochs per task (demo-friendly)", min_value=1, max_value=30, value=3)
     batch_size = st.select_slider("Batch size", options=[32, 64, 128, 256], value=128)
+    num_workers = st.slider("Data loader workers", min_value=0, max_value=4, value=0 if os.name == "nt" else 2)
 
     prefer_cuda = st.checkbox("Use GPU if available", value=True)
     seed = st.number_input("Seed", min_value=0, max_value=10_000_000, value=0)
@@ -227,6 +310,8 @@ def page_setup():
             str(int(epochs)),
             "--batch-size",
             str(int(batch_size)),
+            "--num-workers",
+            str(int(num_workers)),
             "--seed",
             str(int(seed)),
             "--equivalence-threshold",
@@ -251,6 +336,7 @@ def page_setup():
         return
 
     st.subheader("Current Status")
+    _render_run_status(res)
     st.json(res.get("status", {}))
 
     if os.path.exists(LOG_PATH):
@@ -272,14 +358,32 @@ def page_live_training():
     num_tasks = int(cfg.get("num_tasks", 1))
     tasks = res.get("timeline", {}).get("tasks", [])
     completed = len(tasks)
+    status = res.get("status", {}) or {}
+    phase = str(status.get("phase") or "")
 
     colA, colB = st.columns(2)
     with colA:
         st.subheader("Full Retrain")
-        st.progress(min(1.0, completed / max(1, num_tasks)))
+        full_progress = completed / max(1, num_tasks)
+        if phase == "full_retrain":
+            full_progress = min(1.0, (completed + 0.5) / max(1, num_tasks))
+        st.progress(min(1.0, full_progress))
     with colB:
         st.subheader("Delta Method")
-        st.progress(min(1.0, completed / max(1, num_tasks)))
+        delta_progress = completed / max(1, num_tasks)
+        if phase == "delta_training":
+            delta_progress = min(1.0, (completed + 0.5) / max(1, num_tasks))
+        elif phase == "full_retrain":
+            delta_progress = min(1.0, (completed + 1.0) / max(1, num_tasks))
+        st.progress(min(1.0, delta_progress))
+
+    _render_run_status(res)
+    if completed == 0 and str(status.get("state")) == "running":
+        st.info(
+            "The first task is still running. Results will appear after the task finishes, "
+            "because each increment runs both delta training and a full-retrain baseline."
+        )
+    _render_partial_task(res)
 
     with st.expander("Runner logs (tail)"):
         tail = _tail_text(LOG_PATH, max_lines=200)
@@ -296,10 +400,16 @@ def page_live_training():
         )
         st.line_chart(chart)
 
-    full_time = float(df_full["wall_time_s"].sum()) if not df_full.empty else 0.0
-    delta_time = float(df_delta["wall_time_s"].sum()) if not df_delta.empty else 0.0
-    st.metric("Total compute time (Full Retrain)", f"{full_time:.1f}s")
-    st.metric("Total compute time (Delta)", f"{delta_time:.1f}s")
+    full_time = float(df_full["wall_time_s"].sum()) if not df_full.empty else None
+    delta_time = float(df_delta["wall_time_s"].sum()) if not df_delta.empty else None
+    st.metric(
+        "Total compute time (Full Retrain)",
+        f"{full_time:.1f}s" if full_time is not None else "Pending",
+    )
+    st.metric(
+        "Total compute time (Delta)",
+        f"{delta_time:.1f}s" if delta_time is not None else "Pending",
+    )
 
     latest_shift = None
     if tasks:
@@ -343,7 +453,17 @@ def page_results_dashboard():
 
     tasks = res.get("timeline", {}).get("tasks", [])
     if not tasks:
-        st.info("No tasks completed yet.")
+        _render_run_status(res)
+        if str((res.get("status", {}) or {}).get("state")) == "running":
+            st.info(
+                "No tasks are completed yet. The current task still has to finish both the "
+                "delta update and the full-retrain baseline before comparison charts appear."
+            )
+            _render_partial_task(res)
+        elif str((res.get("status", {}) or {}).get("state")) == "failed":
+            st.error(str((res.get("status", {}) or {}).get("message") or "Experiment failed."))
+        else:
+            st.info("No tasks completed yet.")
         return
 
     final = tasks[-1]

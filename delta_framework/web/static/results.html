@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delta Framework - Results</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="results">
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/">Delta Framework</a>
+        <nav class="nav-links">
+          <a class="nav-link" href="/">Setup</a>
+          <a class="nav-link" href="/monitor.html">Live Run</a>
+          <a class="nav-link active" href="/results.html">Results</a>
+        </nav>
+        <div class="nav-meta">
+          <span class="nav-pill" id="nav-run-state">IDLE</span>
+          <span class="nav-pill subtle" id="nav-task-progress">0/0</span>
+        </div>
+      </header>
+
+      <section class="page-hero compact">
+        <div>
+          <span class="eyebrow">Final benchmark view</span>
+          <h1>Results and comparison</h1>
+          <p>Show judges the summary metrics, charts, and deployment decision in one page.</p>
+        </div>
+        <div class="button-row">
+          <button type="button" class="ghost" id="refresh-btn">Refresh state</button>
+        </div>
+      </section>
+
+      <main class="stack">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Performance summary</h2>
+              <p id="results-status-message">Waiting for completed tasks.</p>
+            </div>
+          </div>
+          <div class="metrics-grid results-metrics">
+            <article class="metric-box"><span>Delta compute saved</span><strong id="metric-compute-saved">-</strong></article>
+            <article class="metric-box"><span>Policy compute saved</span><strong id="metric-policy-saved">-</strong></article>
+            <article class="metric-box"><span>Final equivalence gap</span><strong id="metric-gap">-</strong></article>
+            <article class="metric-box"><span>Policy choice</span><strong id="metric-choice">-</strong></article>
+            <article class="metric-box"><span>Full top-1</span><strong id="metric-full-top1">-</strong></article>
+            <article class="metric-box"><span>Delta top-1</span><strong id="metric-delta-top1">-</strong></article>
+          </div>
+        </section>
+
+        <section class="grid two">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Accuracy over tasks</h2>
+                <p>Delta versus full retrain at each increment.</p>
+              </div>
+            </div>
+            <div id="accuracy-chart" class="chart-box empty">No task data yet.</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Per-class accuracy</h2>
+                <p>Final-task behavior for the first visible classes.</p>
+              </div>
+            </div>
+            <div id="class-chart" class="chart-box empty">No per-class metrics yet.</div>
+          </section>
+        </section>
+
+        <section class="grid two">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Deployment decision</h2>
+                <p>Whether the current update is trusted or retraining wins.</p>
+              </div>
+            </div>
+            <div id="decision-panel" class="decision-card muted">
+              <h3>No decision yet</h3>
+              <p>Complete at least one task to populate the decision panel.</p>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Ablations</h2>
+                <p>Optional side-by-side method variants.</p>
+              </div>
+            </div>
+            <div id="ablations-table" class="table-wrap empty">No ablation results yet.</div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <template id="decision-template">
+      <h3></h3>
+      <p class="decision-subtitle"></p>
+      <ul class="reason-list"></ul>
+    </template>
+    <script src="/app.js"></script>
+  </body>
+</html>

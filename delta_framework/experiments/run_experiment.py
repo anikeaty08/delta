@@ -16,8 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def _load_runtime_dependencies() -> Tuple[type, type, Callable[..., dict]]:
-    from delta_framework.core.benchmarker import BenchmarkConfig, run_benchmark
-    from delta_framework.core.trainer import TrainConfig
+    try:
+        from delta_framework.core.benchmarker import BenchmarkConfig, run_benchmark
+        from delta_framework.core.trainer import TrainConfig
+    except Exception as exc:  # pragma: no cover
+        raise ImportError(
+            "The optional ML runtime is not available. Install the project with "
+            "`pip install -e .[ml]` or `pip install -e .[app]` before running the benchmark CLI."
+        ) from exc
 
     return BenchmarkConfig, TrainConfig, run_benchmark
 

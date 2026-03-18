@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delta Framework - Setup</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="setup">
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/">Delta Framework</a>
+        <nav class="nav-links">
+          <a class="nav-link active" href="/">Setup</a>
+          <a class="nav-link" href="/monitor.html">Live Run</a>
+          <a class="nav-link" href="/results.html">Results</a>
+        </nav>
+        <div class="nav-meta">
+          <span class="nav-pill" id="nav-run-state">IDLE</span>
+          <span class="nav-pill subtle" id="nav-task-progress">0/0</span>
+        </div>
+      </header>
+
+      <section class="page-hero">
+        <div>
+          <span class="eyebrow">Shift-aware incremental learning</span>
+          <h1>Configure the experiment</h1>
+          <p>
+            Pick a dataset, choose a demo preset, and launch the full delta-vs-retrain benchmark
+            from one place.
+          </p>
+        </div>
+        <div class="hero-badges">
+          <span class="badge accent">Live run tracking</span>
+          <span class="badge">Results page</span>
+          <span class="badge">Judge-friendly flow</span>
+        </div>
+      </section>
+
+      <main class="page-grid">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Experiment setup</h2>
+              <p>These controls are now standard inputs so they stay responsive and easy to use.</p>
+            </div>
+          </div>
+
+          <div class="preset-grid">
+            <button class="preset-card" type="button" data-preset="fast-demo">
+              <strong>Fast demo</strong>
+              <span>CIFAR-10 • 2 tasks • 1 epoch • CPU-safe</span>
+            </button>
+            <button class="preset-card" type="button" data-preset="balanced">
+              <strong>Balanced</strong>
+              <span>CIFAR-100 • 5 tasks • 2 epochs</span>
+            </button>
+            <button class="preset-card" type="button" data-preset="full-ps">
+              <strong>Full PS</strong>
+              <span>CIFAR-100 • 5 tasks • 3 epochs • ablations</span>
+            </button>
+          </div>
+
+          <form id="config-form" class="config-form">
+            <div class="grid two">
+              <label>
+                <span>Dataset</span>
+                <select name="dataset">
+                  <option value="CIFAR-100">CIFAR-100</option>
+                  <option value="CIFAR-10">CIFAR-10</option>
+                  <option value="TinyImageNet">TinyImageNet</option>
+                </select>
+              </label>
+              <label>
+                <span>Dataset path</span>
+                <input type="text" name="data_path" value="./data" />
+              </label>
+              <label>
+                <span>Tasks</span>
+                <input type="number" name="num_tasks" min="2" max="10" value="5" />
+              </label>
+              <label>
+                <span>Classes per task</span>
+                <input type="number" name="classes_per_task" min="1" max="50" value="20" />
+              </label>
+              <label>
+                <span>Epochs</span>
+                <input type="number" name="epochs" min="1" max="30" value="3" />
+              </label>
+              <label>
+                <span>Batch size</span>
+                <select name="batch_size">
+                  <option value="32">32</option>
+                  <option value="64">64</option>
+                  <option value="128" selected>128</option>
+                  <option value="256">256</option>
+                </select>
+              </label>
+              <label>
+                <span>Workers</span>
+                <input type="number" name="num_workers" min="0" max="8" value="0" />
+              </label>
+              <label>
+                <span>Seed</span>
+                <input type="number" name="seed" min="0" max="9999999" value="0" />
+              </label>
+            </div>
+
+            <div class="grid two">
+              <label>
+                <span>Replay fraction</span>
+                <input type="range" name="old_fraction" min="0" max="0.9" step="0.05" value="0.2" />
+                <output data-for="old_fraction">0.20</output>
+              </label>
+              <label>
+                <span>Shift threshold</span>
+                <input type="range" name="shift_threshold" min="0.05" max="1" step="0.01" value="0.3" />
+                <output data-for="shift_threshold">0.30</output>
+              </label>
+              <label>
+                <span>Equivalence threshold</span>
+                <input type="range" name="equivalence_threshold" min="0.001" max="0.05" step="0.001" value="0.005" />
+                <output data-for="equivalence_threshold">0.005</output>
+              </label>
+              <label>
+                <span>Policy max bound ε</span>
+                <input type="range" name="policy_max_bound_epsilon" min="0.001" max="0.05" step="0.001" value="0.01" />
+                <output data-for="policy_max_bound_epsilon">0.010</output>
+              </label>
+            </div>
+
+            <div class="toggle-grid">
+              <label class="toggle"><input type="checkbox" name="prefer_cuda" checked /><span>Prefer GPU if available</span></label>
+              <label class="toggle"><input type="checkbox" name="use_replay" checked /><span>Replay memory</span></label>
+              <label class="toggle"><input type="checkbox" name="use_kd" checked /><span>Knowledge distillation</span></label>
+              <label class="toggle"><input type="checkbox" name="use_weight_align" checked /><span>Weight alignment</span></label>
+              <label class="toggle"><input type="checkbox" name="run_ablations" /><span>Run ablations</span></label>
+              <label class="toggle"><input type="checkbox" name="fixed_memory" /><span>Fixed memory budget</span></label>
+            </div>
+
+            <div class="button-row">
+              <button type="submit" class="primary">Start experiment</button>
+              <button type="button" class="ghost" id="refresh-btn">Refresh state</button>
+              <button type="button" class="ghost" id="stop-btn">Stop run</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="stack">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Current run</h2>
+                <p id="setup-status-message">No run active yet.</p>
+              </div>
+            </div>
+            <div class="stats-grid">
+              <article class="stat-card">
+                <span>Run state</span>
+                <strong id="setup-run-state">Idle</strong>
+              </article>
+              <article class="stat-card">
+                <span>Current step</span>
+                <strong id="setup-phase">Waiting</strong>
+              </article>
+              <article class="stat-card">
+                <span>Completed tasks</span>
+                <strong id="setup-progress">0/0</strong>
+              </article>
+              <article class="stat-card">
+                <span>Elapsed</span>
+                <strong id="setup-elapsed">n/a</strong>
+              </article>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Demo flow</h2>
+                <p>Use this order for judges.</p>
+              </div>
+            </div>
+            <ol class="steps-list">
+              <li>Use a preset or select your dataset manually.</li>
+              <li>Start the experiment and move to the Live Run page.</li>
+              <li>Watch delta progress and logs while the baseline catches up.</li>
+              <li>Open Results to show compute savings, gap, and deployment choice.</li>
+            </ol>
+          </section>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

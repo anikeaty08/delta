@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Delta Framework - Live Run</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="monitor">
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/">Delta Framework</a>
+        <nav class="nav-links">
+          <a class="nav-link" href="/">Setup</a>
+          <a class="nav-link active" href="/monitor.html">Live Run</a>
+          <a class="nav-link" href="/results.html">Results</a>
+        </nav>
+        <div class="nav-meta">
+          <span class="nav-pill" id="nav-run-state">IDLE</span>
+          <span class="nav-pill subtle" id="nav-task-progress">0/0</span>
+        </div>
+      </header>
+
+      <section class="page-hero compact">
+        <div>
+          <span class="eyebrow">Live experiment view</span>
+          <h1>Monitor the current run</h1>
+          <p>Track both the delta method and the full-retrain baseline while the run is active.</p>
+        </div>
+        <div class="button-row">
+          <button type="button" class="ghost" id="refresh-btn">Refresh state</button>
+          <button type="button" class="ghost" id="stop-btn">Stop run</button>
+        </div>
+      </section>
+
+      <main class="stack">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Run status</h2>
+              <p id="monitor-status-message">Waiting for experiment state.</p>
+            </div>
+          </div>
+          <div class="stats-grid">
+            <article class="stat-card"><span>Run state</span><strong id="monitor-run-state">Idle</strong></article>
+            <article class="stat-card"><span>Current step</span><strong id="monitor-phase">Waiting</strong></article>
+            <article class="stat-card"><span>Completed tasks</span><strong id="monitor-progress">0/0</strong></article>
+            <article class="stat-card"><span>Elapsed</span><strong id="monitor-elapsed">n/a</strong></article>
+          </div>
+          <div class="progress-stack">
+            <div>
+              <div class="progress-label"><span>Delta method</span><span id="delta-progress-label">0%</span></div>
+              <div class="progress-bar"><div id="delta-progress" class="progress-fill accent"></div></div>
+            </div>
+            <div>
+              <div class="progress-label"><span>Full retrain</span><span id="full-progress-label">0%</span></div>
+              <div class="progress-bar"><div id="full-progress" class="progress-fill"></div></div>
+            </div>
+          </div>
+          <div id="partial-card" class="callout hidden"></div>
+        </section>
+
+        <section class="grid two">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Latest task snapshot</h2>
+                <p>The newest metrics available from the runner.</p>
+              </div>
+            </div>
+            <div class="metrics-grid">
+              <article class="metric-box"><span>Delta top-1</span><strong id="monitor-delta-top1">-</strong></article>
+              <article class="metric-box"><span>Full top-1</span><strong id="monitor-full-top1">-</strong></article>
+              <article class="metric-box"><span>Equivalence gap</span><strong id="monitor-gap">-</strong></article>
+              <article class="metric-box"><span>Shift score</span><strong id="monitor-shift">-</strong></article>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Current deployment decision</h2>
+                <p>The system recommendation for the latest completed task.</p>
+              </div>
+            </div>
+            <div id="decision-panel" class="decision-card muted">
+              <h3>No decision yet</h3>
+              <p>Once a task completes, the deployment recommendation appears here.</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Runner logs</h2>
+              <p>Useful while waiting for the first task to finish.</p>
+            </div>
+          </div>
+          <pre id="log-view" class="log-view">No logs yet.</pre>
+        </section>
+      </main>
+    </div>
+    <template id="decision-template">
+      <h3></h3>
+      <p class="decision-subtitle"></p>
+      <ul class="reason-list"></ul>
+    </template>
+    <script src="/app.js"></script>
+  </body>
+</html>

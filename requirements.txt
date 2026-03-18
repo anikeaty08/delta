@@ -1,10 +1,12 @@
-# Core library dependencies.
-# Note: for GPU/CUDA installs, prefer installing `torch`/`torchvision` using the
-# official PyTorch instructions for your platform, then install this project.
-continuum==1.2.2
+# Base library dependency for pure-Python utilities.
+# The full training/runtime stack is optional and depends on upstream support
+# for your Python version and platform.
 numpy>=1.22.3
-torch>=2.0.0
-torchvision>=0.15.0
+
+# Optional ML runtime
+# continuum==1.2.2
+# torch>=2.0.0
+# torchvision>=0.15.0
 
 # Optional UI (Streamlit dashboard)
 # streamlit>=1.25.0

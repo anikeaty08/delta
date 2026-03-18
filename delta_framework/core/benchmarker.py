@@ -118,11 +118,14 @@ def _init_results(config: BenchmarkConfig) -> Dict[str, Any]:
         "status": {
             "state": "idle",
             "current_task": 0,
+            "phase": None,
             "message": "",
             "started_at": None,
+            "phase_started_at": None,
             "updated_at": _now_iso(),
         },
         "timeline": {"tasks": []},
+        "partial_task": None,
         "final_summary": None,
     }
 
@@ -133,8 +136,10 @@ def run_benchmark(config: BenchmarkConfig, *, results_path: str = "results.json"
     results["status"] = {
         "state": "running",
         "current_task": 0,
+        "phase": "setup",
         "message": "Starting experiment",
         "started_at": _now_iso(),
+        "phase_started_at": _now_iso(),
         "updated_at": _now_iso(),
     }
     _atomic_write_json(results_path, results)
@@ -197,9 +202,11 @@ def run_benchmark(config: BenchmarkConfig, *, results_path: str = "results.json"
 
             results["status"] = {
                 "state": "running",
-                "current_task": int(task_id),
-                "message": f"Training task {task_id + 1}/{config.num_tasks}",
+                "current_task": int(task_id + 1),
+                "phase": "delta_training",
+                "message": f"Training delta model for task {task_id + 1}/{config.num_tasks}",
                 "started_at": results["status"]["started_at"],
+                "phase_started_at": _now_iso(),
                 "updated_at": _now_iso(),
             }
             _atomic_write_json(results_path, results)
@@ -235,6 +242,22 @@ def run_benchmark(config: BenchmarkConfig, *, results_path: str = "results.json"
             delta_model, teacher_model, delta_metrics, _delta_artifacts = delta_out
             delta_metrics["wall_time_s"] = float(delta_wall_s)
             delta_metrics["peak_mem_mb"] = float(delta_peak_mb)
+            results["partial_task"] = {
+                "task_id": int(task_id),
+                "seen_classes": int(known_classes + nb_new),
+                "delta": delta_metrics,
+                "delta_artifacts": _delta_artifacts,
+            }
+            results["status"] = {
+                "state": "running",
+                "current_task": int(task_id + 1),
+                "phase": "full_retrain",
+                "message": f"Training full retrain baseline for task {task_id + 1}/{config.num_tasks}",
+                "started_at": results["status"]["started_at"],
+                "phase_started_at": _now_iso(),
+                "updated_at": _now_iso(),
+            }
+            _atomic_write_json(results_path, results)
 
             # Full retrain baseline on all seen data.
             dataset_train_full = scenario_train[: task_id + 1]
@@ -380,6 +403,7 @@ def run_benchmark(config: BenchmarkConfig, *, results_path: str = "results.json"
             }
 
             results["timeline"]["tasks"].append(task_record)
+            results["partial_task"] = None
             results["status"]["updated_at"] = _now_iso()
             _atomic_write_json(results_path, results)
             logger.info(
@@ -470,8 +494,10 @@ def run_benchmark(config: BenchmarkConfig, *, results_path: str = "results.json"
         results["status"] = {
             "state": "completed",
             "current_task": int(config.num_tasks),
+            "phase": "completed",
             "message": "Experiment completed",
             "started_at": results["status"]["started_at"],
+            "phase_started_at": _now_iso(),
             "updated_at": _now_iso(),
         }
         _atomic_write_json(results_path, results)
@@ -481,8 +507,10 @@ def run_benchmark(config: BenchmarkConfig, *, results_path: str = "results.json"
         results["status"] = {
             "state": "failed",
             "current_task": int(results["status"].get("current_task", 0)),
+            "phase": "failed",
             "message": f"Experiment failed: {type(e).__name__}: {e}",
             "started_at": results["status"]["started_at"],
+            "phase_started_at": _now_iso(),
             "updated_at": _now_iso(),
         }
         results["error"] = {
